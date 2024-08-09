@@ -1,0 +1,311 @@
+/* 
+    Name : Ashish Reddy Vangala
+    Course Number : CS30200 OPERATING SYSTEMS Spring 2024
+    InClass Course Number : 500
+    Project Description : This assignment involves developing a C++ CPU scheduling simulator that models the execution of 
+        real-time and interactive processes with various resource requests, including CPU time, disk reads, and terminal accesses. 
+        The simulator prioritizes real-time processes to meet deadlines, implements preemptive scheduling, and provides a 
+        summary report of the simulation metrics, showcasing the complexities of process scheduling and 
+        resource management in an operating system environment.
+*/
+
+#include <iostream>
+#include <fstream>
+#include <queue>
+#include <string>
+#include <vector>
+#include <climits>
+
+using namespace std;
+
+// Enum for resource types a process might request
+enum class ResourceType {
+    CPU,
+    DISK,
+    TTY,
+    NONE // Default value for processes that don't specify a resource
+};
+
+// Converts ResourceType enum to string for display purposes
+std::string ResourceTypeToString(ResourceType type) {
+    switch (type) {
+        case ResourceType::CPU: return "CPU";
+        case ResourceType::DISK: return "DISK";
+        case ResourceType::TTY: return "TTY";
+        case ResourceType::NONE: return "NONE";
+        default: return "Unknown";
+    }
+}
+
+// Converts string to ResourceType enum, useful for parsing input
+ResourceType stringToResourceType(const std::string& type) {
+    if (type == "CPU") return ResourceType::CPU;
+    if (type == "DISK") return ResourceType::DISK;
+    if (type == "TTY") return ResourceType::TTY;
+    return ResourceType::NONE;
+}
+
+// Structure to hold resource requests with their types and durations
+struct ResourceRequest {
+    ResourceType type;
+    int timeNeeded; // Time needed for the resource
+
+    ResourceRequest(ResourceType resourceType, int time) : type(resourceType), timeNeeded(time) {}
+};
+
+
+// Base class for processes
+class Process {
+public:
+    int processID;
+    string processType; // "REAL-TIME" or "INTERACTIVE"
+    int arrivalTime;
+    int cpuTimeNeeded;
+    string status; // "READY", "RUNNING", "WAITING", "TERMINATED"
+    queue<ResourceRequest> resourceQueue; // Queue to manage resource requests
+
+    Process(int id, string type, int arrival, int cpuTime, ResourceType resource = ResourceType::NONE) : 
+        processID(id), processType(type), arrivalTime(arrival), cpuTimeNeeded(cpuTime), status("READY") {
+        if(resource != ResourceType::NONE) {
+            resourceQueue.push(ResourceRequest(resource, cpuTime));
+        }
+    }
+    
+    // Add a new resource request to the process
+    void addResourceRequest(ResourceType resource, int time) {
+        resourceQueue.push(ResourceRequest(resource, time));
+    }
+
+protected:
+    // Display all resource requests of the process
+    void displayResourceRequests() {
+        std::queue<ResourceRequest> tempQueue = resourceQueue; // Copy the original queue to a temporary one for iteration
+    
+        while (!tempQueue.empty()) {
+            ResourceRequest& resource = tempQueue.front();
+            cout << "Resource: " << getResourceTypeName(resource.type) << ", Time Needed: " << resource.timeNeeded << endl;
+            tempQueue.pop(); // Remove the element from the temporary queue after printing
+        }
+    }
+
+    // Converts ResourceType to string for display
+    string getResourceTypeName(ResourceType resource) {
+        switch(resource) {
+            case ResourceType::CPU: return "CPU";
+            case ResourceType::DISK: return "DISK";
+            case ResourceType::TTY: return "TTY";
+            default: return "NONE";
+        }
+    }
+
+    virtual ~Process() {}  // Virtual destructor for proper cleanup
+};
+
+
+// Derived class for Real-Time processes
+class RealTimeProcess : public Process {
+public:
+    int deadline;
+    RealTimeProcess(int id, int arrival, int deadline, ResourceType initialResource = ResourceType::NONE)
+        : Process(id, "REAL-TIME", arrival, 0, initialResource), deadline(deadline) {}
+};
+
+// Derived class for Interactive processes
+class InteractiveProcess : public Process {
+public:
+    InteractiveProcess(int id, int arrival, int cpuTime, ResourceType resource = ResourceType::NONE) :
+        Process(id, "INTERACTIVE", arrival, cpuTime, resource) {}
+};
+
+
+
+// Comparator for process priority queue, prioritizes based on arrival time
+struct ProcessComparator {
+    bool operator()(const Process* lhs, const Process* rhs) const {
+        return lhs->arrivalTime > rhs->arrivalTime;
+    }
+};
+
+// Priority queues for real-time and interactive processes
+std::priority_queue<Process*, std::vector<Process*>, ProcessComparator> realTimeQueue;
+std::priority_queue<Process*, std::vector<Process*>, ProcessComparator> interactiveQueue;
+
+// Function to requeue process with updated arrival time for next resource request
+void requeueProcess(Process* process, int additionalTime) {
+    process->arrivalTime += additionalTime; // Update arrivalTime for next resource request
+    if (process->processType == "REAL-TIME") {
+        realTimeQueue.push(process);
+    } else {
+        interactiveQueue.push(process);
+    }
+}
+
+// Global counters and trackers for summary report
+int totalRealTimeProcessesCompleted = 0;
+int realTimeProcessesMissedDeadline = 0;
+int totalInteractiveProcessesCompleted = 0;
+int totalDiskAccesses = 0;
+int totalDiskAccessTime = 0;
+int totalCpuBusyTime = 0;
+int simulationStartTime = 0;
+int simulationEndTime = 0;
+int totalDiskBusyTime = 0;
+
+// Prints summary report at the end of simulation
+void printSummaryReport() {
+    int totalSimulationTime = simulationEndTime - simulationStartTime;
+    double percentageRealTimeMissedDeadline = (totalRealTimeProcessesCompleted > 0) ? (double)realTimeProcessesMissedDeadline / totalRealTimeProcessesCompleted * 100 : 0;
+    double averageDiskAccessDuration = (totalDiskAccesses > 0) ? (double)totalDiskAccessTime / totalDiskAccesses : 0;
+    double cpuUtilization = (double)totalCpuBusyTime / totalSimulationTime * 100;
+    double diskUtilization = (double)totalDiskBusyTime / totalSimulationTime * 100;
+
+    std::cout << "Summary Report:" << std::endl;
+    std::cout << "a) Number of real-time processes that have completed: " << totalRealTimeProcessesCompleted << std::endl;
+    std::cout << "b) Percentage of real-time processes that missed their deadline: " << percentageRealTimeMissedDeadline << "%" << std::endl;
+    std::cout << "c) Number of interactive processes that have completed: " << totalInteractiveProcessesCompleted << std::endl;
+    std::cout << "d) Total number of disk accesses: " << totalDiskAccesses << std::endl;
+    std::cout << "e) Average duration of a disk access: " << averageDiskAccessDuration << "ms" << std::endl;
+    std::cout << "f) Total time elapsed since the start of the first process: " << totalSimulationTime << "ms" << std::endl;
+    std::cout << "g) CPU Utilization: " << cpuUtilization << "%" << std::endl;
+    std::cout << "   Disk Utilization: " << diskUtilization << "%" << std::endl;
+}
+
+
+int main() {
+    // // Open the input file to read process data
+    // ifstream cin("input.txt");
+    // if (!cin.is_open()) {
+    //     cerr << "Failed to open file." << endl;
+    //     return 1;
+    // }
+    
+    // Variables to hold process information and simulation state
+    int earliestArrivalTime = INT_MAX; // Tracks the earliest process arrival time
+    int currentTime = 0; // The current time of the simulation
+    string processType; // Type of process being read (REAL-TIME or INTERACTIVE)
+    int time; // Time associated with the current line being read
+    int sequenceNumber = 1; // Unique identifier for processes
+    Process* currentProcess = nullptr; // Pointer to hold the current process being processed
+    
+    
+    // Read processes from the input file and populate queues
+    while(cin >> processType) {
+        cin >> time;
+        
+        // Determine the type of line being read and act accordingly
+        if (processType == "INTERACTIVE") {
+            // Create a new interactive process and add it to the queue
+            InteractiveProcess* process = new InteractiveProcess(sequenceNumber, time, 0, ResourceType::NONE);
+            interactiveQueue.push(process); // Add to interactive queue
+            currentProcess = process; // Update current process reference
+            sequenceNumber++;
+            // Update the earliest arrival time if needed
+            if (time < earliestArrivalTime) {
+                earliestArrivalTime = time;
+            }
+            
+        } else if (processType == "REAL-TIME") {
+            // Create a new real-time process and add it to the queue
+            string deadline;
+            int deadlineTime;
+            cin >> deadline;
+            cin >> deadlineTime; // Read deadline for real-time processes
+            RealTimeProcess* process = new RealTimeProcess(sequenceNumber, time, deadlineTime);
+            realTimeQueue.push(process); // Add to real-time queue
+            currentProcess = process; // Update current process reference
+            sequenceNumber++;
+            // Update earliestArrivalTime if the current process's arrivalTime is earlier.
+            if (time < earliestArrivalTime) earliestArrivalTime = time;
+        }
+         else {
+            // For resource request lines, add the request to the current process
+            if (currentProcess) {
+                currentProcess->addResourceRequest(stringToResourceType(processType), time);
+            }
+        }
+    }
+    
+    
+    // Initialize the simulation start time
+    currentTime = (earliestArrivalTime == INT_MAX) ? 0 : earliestArrivalTime; // Check to avoid INT_MAX if no processes were found.
+    simulationStartTime = currentTime; // Record the start time of the simulation
+    
+    
+    // Main simulation loop
+    while (!realTimeQueue.empty() || !interactiveQueue.empty()) {
+        Process* currentProcess = nullptr;
+        int startTime = 0;
+    
+        // Select the next process to run based on priority and arrival time
+        if (!realTimeQueue.empty() && (interactiveQueue.empty() || realTimeQueue.top()->arrivalTime <= currentTime)) {
+            // Real-time process has priority
+            currentProcess = realTimeQueue.top();
+            realTimeQueue.pop();
+            startTime = max(currentTime, currentProcess->arrivalTime);
+        } else if (!interactiveQueue.empty()) {
+            // Run interactive process if no real-time process is ready
+            currentProcess = interactiveQueue.top();
+            interactiveQueue.pop();
+            startTime = max(currentTime, currentProcess->arrivalTime);
+        }
+        
+        // Execute the selected process
+        if (currentProcess != nullptr) {
+            currentProcess->status = "RUNNING";
+            currentTime = startTime; // Update the simulation time to process start time
+            // Output the start of the process execution
+            cout << "Process " << currentProcess->processID << " (" << currentProcess->processType << ") starts " << ResourceTypeToString(currentProcess->resourceQueue.front().type) << " at " << currentTime << "ms (RUNNING)" << endl;
+            
+            // Process the resource request
+            if (!currentProcess->resourceQueue.empty()) {
+                auto resourceRequest = currentProcess->resourceQueue.front();
+                
+                // Handle CPU and Disk resource types ---- Simulation results
+                if (ResourceTypeToString(currentProcess->resourceQueue.front().type)=="CPU") {
+                    totalCpuBusyTime += currentProcess->resourceQueue.front().timeNeeded; // CPU is busy for the duration of this request
+                }
+                
+                currentProcess->resourceQueue.pop();
+                // Update simulation time based on the resource request
+                currentTime += resourceRequest.timeNeeded; // Advance time by resource need
+    
+                // Check if process is completed or needs to wait for next resource
+                if (currentProcess->resourceQueue.empty()) {
+                    currentProcess->status = "TERMINATED";
+                    cout << "Process " << currentProcess->processID << " (" << currentProcess->processType << ") terminates " << ResourceTypeToString(currentProcess->resourceQueue.front().type) << " at " << currentTime << "ms (TERMINATED)" << endl;
+                    
+                    // Updating Processes completeness variables ---- simulation Results
+                    if (currentProcess->processType == "REAL-TIME") {
+                        totalRealTimeProcessesCompleted++;
+                        if (currentTime > static_cast<RealTimeProcess*>(currentProcess)->deadline) {
+                            realTimeProcessesMissedDeadline++;
+                        }
+                    } else if (currentProcess->processType == "INTERACTIVE") {
+                        totalInteractiveProcessesCompleted++;
+                    }
+                } else {
+                    currentProcess->status = "WAITING"; // Awaiting next resource
+                    cout << "Process " << currentProcess->processID << " (" << currentProcess->processType << ") starts " << ResourceTypeToString(currentProcess->resourceQueue.front().type) << " at " << currentTime << "ms (RUNNING)" << endl;
+                    if (ResourceTypeToString(currentProcess->resourceQueue.front().type)=="DISK") {
+                        totalDiskAccesses++; // Counting each disk access
+                        totalDiskAccessTime += currentProcess->resourceQueue.front().timeNeeded; // Cumulative disk access time
+                        totalDiskBusyTime += currentProcess->resourceQueue.front().timeNeeded; // Disk is busy for the duration of this request
+                    }
+                    
+                    // Logic to requeue the process with its next resource request
+                    int nextRequestDuration = currentProcess->resourceQueue.front().timeNeeded;
+                    currentProcess->resourceQueue.pop(); // Assume resource request is completed
+                    currentProcess->arrivalTime=currentTime;
+                    requeueProcess(currentProcess, nextRequestDuration); // Requeue with updated arrivalTime
+                }
+            }
+        }
+    }
+    // Record the end time of the simulation
+    simulationEndTime = currentTime;
+    
+    // Print the summary report of the simulation
+    printSummaryReport();
+
+    return 0; // End of program
+}
